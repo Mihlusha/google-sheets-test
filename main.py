@@ -1,13 +1,42 @@
 import time
-
+import datetime
 from db import db,sql
 import requests
 from bs4 import BeautifulSoup
 import lxml
-
+import telegram
 import httplib2
 from googleapiclient import discovery
 from oauth2client.service_account import ServiceAccountCredentials
+import threading as tr
+
+import telebot
+
+
+def token():
+    with open("token.txt", "r", encoding="utf-8") as f:
+        i = f.readline()
+    return i.strip()
+
+
+API_TOKEN = token()
+
+# Initialize bot and dispatcher
+bot = telebot.TeleBot(API_TOKEN)
+
+list_chat_id = []
+
+
+# Инициализация пользователей бота
+@bot.message_handler(commands=["start"])
+def process_start_command(message):
+    if message.chat.id not in list_chat_id:
+        list_chat_id.append(message.chat.id) # сохраняем id пользователя для дальнейшей рассылки
+    bot.send_message(
+        chat_id=message.chat.id,
+        text=f"Привет!\nЗдесь будут приходить уведомления об окончании срока поставки из таблицы."
+             f" Если будут вопросы пиши @nagnalov"
+    )
 
 
 # Авторизация в гугл и запрос данных из таблицы
@@ -85,8 +114,26 @@ def difference(tuple_1: tuple, tuple_2: tuple) -> list:
 # Основная функция работы
 def processing():
     snap_last_update = ()
+    list_end_dilivery = []
     while True:
         data_from_sheet = google_sheets()[1:] # Берем из таблицы все строки кроме первой
+        date_now = datetime.datetime.strptime(time.strftime('%d.%m.20%y'),'%d.%m.20%y') # Смотрим актуальную дату
+
+        for i in data_from_sheet:
+            date_dilivery = datetime.datetime.strptime(i[3], '%d.%m.20%y') # Смотрим дату поставки
+            if date_dilivery < date_now:
+
+                if i[0] not in list_end_dilivery:
+                    # Отправляем уведомление в телеграмме и смотрим ответ, если 1, то уведомление отправилось
+                    if telegram.send_message(list_chat_id,
+                                             f'Срок поставки заказа №{i[0]} истек'
+                                             ) == 1:
+                        list_end_dilivery.append(i[0])
+                        print('Срок поставки прошел, уведомление отправлено')
+                    else:
+                        print('Срок поставки прошел, не удалось отправить уведомление')
+
+
 
         if data_from_sheet != snap_last_update: # Сравниваем с последней записью
 
@@ -139,5 +186,6 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    tr.Thread(target=main).start()
+    bot.polling(none_stop=True, interval=0)
 
